@@ -6,6 +6,4 @@ void setup(){
   SPI.begin(); //initialize SPI
   pinMode(STEPPERENABLEPIN, OUTPUT); //Enable motors
   digitalWrite(STEPPERENABLEPIN, HIGH); //motor enable 
-  
-  
 }
