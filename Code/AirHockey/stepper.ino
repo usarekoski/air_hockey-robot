@@ -5,7 +5,8 @@ byte motor2Phase = 1;
 byte motorByte = 0; // byte that is sent to shift register and controls H-bridges
 
 
-void stepperDrive(int motor1Dir, int motor2Dir){
+void stepperDrive(int motor2Dir, int motor1Dir){
+  //Serial.println(motor1Dir);
   //motor1(LEFT):
   if(motor1Dir != 0){
     if(motor1Dir == 1)motor1Phase += 1;
@@ -68,9 +69,15 @@ void stepperDrive(int motor1Dir, int motor2Dir){
 }
 
 void sendByte(byte mByte){ //send updated state to stepper drivers
-  register int x = 0; //some useless sorcery from when I tested the maximum update speed
-  fastGpioDigitalWrite(LATCHPIN, x); //prepare register for a new byte
-  x =!x;
+  //register int x = 0; //some useless sorcery from when I tested the maximum update speed
+  //fastGpioDigitalWrite(LATCHPIN, x); //prepare register for a new byte
+  //digitalWrite(3, x);
+  //x =!x;
+  fastGpioDigitalWriteDestructive(latchValue);
+       latchValue ^= GPIO_FAST_IO3;
   SPI.transfer(mByte);
-  fastGpioDigitalWrite(LATCHPIN, x);
+  fastGpioDigitalWriteDestructive(latchValue);
+       latchValue ^= GPIO_FAST_IO3;
+  //fastGpioDigitalWrite(LATCHPIN, x);
+  //digitalWrite(3, x);
 }
