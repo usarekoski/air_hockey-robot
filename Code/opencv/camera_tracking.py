@@ -52,9 +52,9 @@ def find_object(frame, min_area, max_area):
         num_objects = len(hierarchy)
         if num_objects < max_num_objects:
             for i in range(num_objects):
-                area = cv2.contourArea(contours[i])
+                area = cv2.contourArea(contours[i].astype('int'))
                 if area > min_area and area < max_area and area > previous_area:
-                    moments = cv2.moments(contours[i])
+                    moments = cv2.moments(contours[i].astype('int'))
                     x = int(moments['m10'] / area)
                     y = int(moments['m01'] / area)
                     object_found = True
@@ -62,9 +62,13 @@ def find_object(frame, min_area, max_area):
     return object_found, x, y
 
 #Convert from camera reference system to robot reference system
-def reference_system_conversion(x, y):
-    puck_x = (y-cam_calib_x)*pixel_to_m
-    puck_y = (-x+cam_calib_y)*pixel_to_m
+def reference_system_conversion(x, y, backwards):
+    if backwards == False:
+        puck_x = (y-cam_calib_x)*pixel_to_m
+        puck_y = (-x+cam_calib_y)*pixel_to_m
+    if backwards == True:
+        puck_x = -(x / pixel_to_m - cam_calib_y)
+        puck_y = y / pixel_to_m + cam_calib_y
     return puck_x, puck_y
 
 #Find puck's speed and generate trajectory prediction:
@@ -85,6 +89,10 @@ def puck_trajectory(previous_puck_x, previous_puck_y, puck_x, puck_y):
             impact_x = (defense_y-b)/k
     return impact_x
 
+def write_to_file(coordinates):
+    with open('coordinates', 'w') as file:
+        file.write(coordinates)
+
 def main():
     #Open the camera
     cap = cv2.VideoCapture(0)
@@ -97,27 +105,35 @@ def main():
         ret,frame = cap.read()
         
         mask = color_mask(frame, puck_color_lower, puck_color_upper)
-        object_found, x, y = find_object(mask, puck_min_area, puck_max_area)
+        object_found, puck_x_pixels, puck_y_pixels = find_object(mask, puck_min_area, puck_max_area)
         if object_found == True:
-            puck_x, puck_y = reference_system_conversion(x, y)
+            puck_x, puck_y = reference_system_conversion(puck_x_pixels, puck_y_pixels, False)
             impact_x = puck_trajectory(previous_puck_x, previous_puck_y, puck_x, puck_y)
             previous_puck_x = puck_x
             previous_puck_y = puck_y
 
         #This shows captured video with some information on monitor,
         #used for debugging.
-        if debug == True:
+        if debug:
             if object_found == True:
                 cv2.putText(frame,"Tracking Object",(100,100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
-                cv2.circle(frame,(x, y), 63, (0,0,255), -1)
-                cv2.line(frame,(x, y),(int(impact_x), defense_y),255)
+                cv2.circle(frame,(puck_x_pixels,puck_y_pixels), 63, (0,0,255), -1)
+                impact_x_pixels, defense_y_pixels = reference_system_conversion(impact_x, defense_y, True)
+                impact_x_pixels, defense_y_pixels = int(impact_x_pixels), int(defense_y_pixels)
+                cv2.line(frame,(puck_x_pixels,puck_y_pixels),(impact_x_pixels, defense_y_pixels),255)
+                print(impact_x)
+
             else:
                 cv2.putText(frame,"Too much noise",(100,100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
             cv2.imshow('camera',frame)
-            cv2.imshow('mask',mask)
             k = cv2.waitKey(5) & 0xFF
             if k == 27:
                 break
+
+        else:
+            if object_found == True:
+                print(impact_x)
+                write_to_file(impact_x)
             
 
 main()
