@@ -3,8 +3,8 @@ uint32_t latchValue;
 
 void setup(){
   Serial.begin(115200);
-  Serial1.begin(9600);
   Serial.println("Setup");
+  //Serial.println("Start");
   //Stepper driver:
   //pinMode(LATCHPIN, OUTPUT_FAST); //latchpin set to fast mode
   latchValue = fastGpioDigitalLatch();
@@ -13,5 +13,5 @@ void setup(){
   pinMode(STEPPERENABLEPIN, OUTPUT); //Enable motors
   digitalWrite(STEPPERENABLEPIN, HIGH); //motor enable 
   sendByte(170);
-  delay(7000);
+  delay(70000);
 }
