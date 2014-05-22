@@ -1,6 +1,3 @@
-float xPos = MOTORSPAN/2; // current coordinates before planned move, these are updated after target is reached
-float yPos = MIN_YPOS;
-
 float thetaL;
 float thetaR;
 float oldThetaL = 65;
@@ -20,6 +17,8 @@ void moveUpdate(){ // this should be run every 1-2ms during moves
     kinematics(xPos,yPos); // calculate path
     moveFlag = 1;
     moveXY = 1;
+    Serial.println(targetX);
+    Serial.println(targetY);
   }
   if(moveXY==1){ //get new coordinates and update x and y variables
     getXY();

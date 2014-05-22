@@ -5,16 +5,16 @@ unsigned long stepperTime = 0;
 int s = 0;
 
 void stepperTest(){
-  if((Time - stepperTime) > 5 && dir == 0){
+  if((Time - stepperTime) > 3 && dir == 0){
     stepperTime = Time;
     s++;
-    stepperDrive(1,-1);
-    if(s == 100){
+    stepperDrive(1,0);
+    //if(s == 100){
       
-      delay(150);
-      dir = 1;
-      s=0;
-    }
+      //delay(150);
+      //dir = 1;
+      //s=0;
+    //}
   }
   if((Time - stepperTime) > 5 && dir == 1){
     stepperTime = Time;

@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
 import os
+import time
 
-#Galileo = linux2
+#Galileo = clanton
 if os.uname()[1] == 'clanton':
     import serial
     debug = False
@@ -12,7 +13,7 @@ else:
 #Camera parameters: resolution is 640px*320px and fps is 60.
 frame_time = 0.01667 
 cam_calib_x = 320
-cam_calib_y = 480
+cam_calib_y = 20
 
 #Table dimensions
 side_distance = 0.01
@@ -26,8 +27,10 @@ kernel_dilation = np.ones((10,10),np.uint8)
 kernel_erosion = np.ones((5,5),np.uint8)
 max_num_objects = 50
 #Puck is yellow and round (r = 22.5mm).
-puck_color_lower = np.array([40,100,150])
+puck_color_lower = np.array([40,70,150])
 puck_color_upper = np.array([55,255,255])
+pusher_color_lower = np.array([87,100,200])
+pusher_color_upper = np.array([110,255,255])
 puck_min_area = 20*20
 puck_max_area = 200*200
 
@@ -72,15 +75,15 @@ def find_object(frame, min_area, max_area):
     return object_found, x, y
 
 #Convert from camera reference system to robot reference system
-def reference_system_conversion(x, y, backwards):
+def reference_system_conversion(x, y, backwards = False):
     #pixels to metres
     if backwards == False:
-        puck_x = (-y+cam_calib_y)*pixel_to_m
+        puck_x = (y + cam_calib_y)*pixel_to_m 
         puck_y = (x-cam_calib_x)*pixel_to_m
     #metres to pixels
     if backwards == True:
         puck_x = (y / pixel_to_m + cam_calib_x)
-        puck_y = -x / pixel_to_m + cam_calib_y
+        puck_y = x / pixel_to_m -cam_calib_y
         #Round to pixels
         puck_x, puck_y = int(puck_x), int(puck_y)
     return puck_x, puck_y
@@ -128,11 +131,64 @@ def puck_trajectory(previous_puck_x, previous_puck_y, puck_x, puck_y):
 
 #Write coordinates to serial.
 if not debug:
-    def write_to_serial(x):
-        x = int(x*1000) #metres to millimetres
-        x = str(x)
+    def write_to_serial(x, y, reset_coordinates = 0):
+        x, y = int(x*1000), int(y*1000) #metres to millimetres
+        x, y, reset_coordinates  = str(x), str(y), str(reset_coordinates)
         ttyS0 = serial.Serial('/dev/ttyS0', 9600)
-        ttyS0.write(x)
+        ttyS0.write(x.zfill(3)+'x'+y.zfill(3)+'y'+reset_coordinates+',')
+	print(x.zfill(3)+'x'+y.zfill(3)+'y'+reset_coordinates+',')
+
+def locate_pusher(camera, color_lower, color_upper, start_x, start_y):
+    print("Locating pusher...")
+    while True:
+        #Take each frame
+        ret,frame = camera.read()
+        #Mask pusher by color
+        mask = color_mask(frame, color_lower, color_upper)
+        #Find it's position
+        object_found, x_pixels, y_pixels = find_object(mask, puck_min_area, puck_max_area)
+        x, y = reference_system_conversion(x_pixels, y_pixels)
+        if object_found == True:
+            delta_x, delta_y = start_x -x, start_y -y
+            distance = pow(pow(delta_x,2)+pow((delta_y-y),2),0.5)
+            if distance <= 0.01:
+                break #Pusher is in starting position
+		write_to_serial(x, y, 1)
+		print("Pusher located")
+            else:
+                write_to_serial(delta_x, delta_y)
+		print(delta_x, delta_y)
+                time.sleep(15) #Pusher is moving
+
+#This shows captured video with some information on monitor,
+#used for debugging and calibrating.
+def show_video(frame,mask,object_found,puck_x_pixels,puck_y_pixels,impact_x,bounce_x=0,bounce_y=0):
+    defense_x_pixels, defense_y_pixels = reference_system_conversion(defense_x, defense_y, True)
+    _, side_distance_pixels  = reference_system_conversion(side_distance, 0, True)
+    if object_found == True:
+        cv2.putText(frame,"Tracking object",(50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, 255)
+        cv2.circle(frame,(puck_x_pixels,puck_y_pixels), 30, (0,0,255), -1)
+        impact_x_pixels, impact_y_pixels = reference_system_conversion(impact_x,0,True)
+        #If puck bounces, draw two lines
+        if bounce_x != 0:
+            bounce_x_pixels, bounce_y_pixels = reference_system_conversion(bounce_x, bounce_y, True)
+            cv2.line(frame,(puck_x_pixels,puck_y_pixels),(bounce_x_pixels, bounce_y_pixels),255)
+            cv2.line(frame,(bounce_x_pixels, bounce_y_pixels),(defense_x_pixels, impact_y_pixels),255)
+        #No bounce
+        else:
+            cv2.line(frame,(puck_x_pixels,puck_y_pixels),(defense_x_pixels, impact_y_pixels),255)
+        print(impact_x)
+        print(impact_y_pixels)
+    else:
+        cv2.putText(frame,"Cannot find the object",(50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, 255)
+    cv2.line(frame,(defense_x_pixels,0),(defense_x_pixels,480),100,4)
+    cv2.line(frame,(0,side_distance_pixels),(640,side_distance_pixels),(0,0,255),2)
+    cv2.line(frame,(0,480-side_distance_pixels),(640,480-side_distance_pixels),(0,0,255),2)
+    cv2.imshow('camera',frame)
+    cv2.imshow('puck mask',mask)
+    k = cv2.waitKey(5) & 0xFF
+
+
 
 
 def main():
@@ -141,63 +197,33 @@ def main():
     #Reset puck position
     previous_puck_x = 0
     previous_puck_y = 0
-    #Defense position for drawing
-    if debug:
-        defense_x_pixels, defense_y_pixels = reference_system_conversion(defense_x, defense_y, True)
-        _, side_distance_pixels  = reference_system_conversion(side_distance, 0, True)
-
+    #Locating pusher at start, not used
+    #if not debug:
+        #locate_pusher(cap, pusher_color_lower, pusher_color_upper, defense_x, defense_y)
     while True:
+        impact_x = defense_x #default postion
         #Take each frame
         ret,frame = cap.read()
         #Mask puck by color
-        mask = color_mask(frame, puck_color_lower, puck_color_upper)
+        mask = color_mask(frame, pusher_color_lower, pusher_color_upper)
         #Find it's position
         object_found, puck_x_pixels, puck_y_pixels = find_object(mask, puck_min_area, puck_max_area)
         if object_found == True:
             #Convert pixels to metres
             puck_x, puck_y = reference_system_conversion(puck_x_pixels, puck_y_pixels, False)
             #Find defense position
-            impact_x, bounce_x, bounce_y = puck_trajectory(previous_puck_x, previous_puck_y, puck_x, puck_y)
+	    if previous_puck_x != 0 or previous_puck_y != 0:
+                impact_x, bounce_x, bounce_y = puck_trajectory(previous_puck_x, previous_puck_y, puck_x, puck_y)
+                if debug:
+                    show_video(frame,mask,object_found,puck_x_pixels,puck_y_pixels,impact_x,bounce_x,bounce_y)
             #Update position
             previous_puck_x = puck_x
             previous_puck_y = puck_y
-
-        #This shows captured video with some information on monitor,
-        #used for debugging and calibrating.
-        if debug:
-            if object_found == True:
-                cv2.putText(frame,"Tracking object",(50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, 255)
-                cv2.circle(frame,(puck_x_pixels,puck_y_pixels), 30, (0,0,255), -1)
-                impact_x_pixels, impact_y_pixels = reference_system_conversion(impact_x,0,True)
-                #If puck bounces, draw two lines
-                if bounce_x != 0:
-                    bounce_x_pixels, bounce_y_pixels = reference_system_conversion(bounce_x, bounce_y, True)
-                    cv2.line(frame,(puck_x_pixels,puck_y_pixels),(bounce_x_pixels, bounce_y_pixels),255)
-                    cv2.line(frame,(bounce_x_pixels, bounce_y_pixels),(defense_x_pixels, impact_y_pixels),255)
-                #No bounce
-                else:
-                    cv2.line(frame,(puck_x_pixels,puck_y_pixels),(defense_x_pixels, impact_y_pixels),255)
-                print(impact_x)
-                print(impact_y_pixels)
-
-            else:
-                cv2.putText(frame,"Cannot find the object",(50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, 255)
-
-            cv2.line(frame,(defense_x_pixels,0),(defense_x_pixels,480),100,4)
-            cv2.line(frame,(0,side_distance_pixels),(640,side_distance_pixels),(0,0,255),2)
-            cv2.line(frame,(0,480-side_distance_pixels),(640,480-side_distance_pixels),(0,0,255),2)
-            cv2.imshow('camera',frame)
-            cv2.imshow('puck mask',mask)
-            k = cv2.waitKey(5) & 0xFF
-            if k == 27:
-                break
-
-        else:
-            if object_found == True:
+            if not debug:
                 print(impact_x)
                 #Send defense position to another galileo
-                write_to_file(impact_x, defense_y)
                 write_to_serial(impact_x, defense_y)
-            
+        if debug:
+            show_video(frame,mask,object_found,puck_x_pixels,puck_y_pixels,impact_x)
 
 main()
